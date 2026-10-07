@@ -1,7 +1,7 @@
 """
 Olist data warehouse pipeline
 
-load_staging >> build_dims >> build_fact
+load_staging >> build_dims >> build_fact >> build_reporting
 """
 from __future__ import annotations
 
@@ -81,7 +81,7 @@ with DAG(
         task_id="load_staging",
         python_callable=load_staging,
     )
-    
+
     t_build_dims = SQLExecuteQueryOperator(
         task_id="build_dims",
         conn_id=WAREHOUSE_CONN_ID,
@@ -103,5 +103,10 @@ with DAG(
         ],
     )
 
+    t_build_reporting = SQLExecuteQueryOperator(
+        task_id="build_reporting",
+        conn_id=WAREHOUSE_CONN_ID,
+        sql="reporting/70_reporting_views.sql",
+    )
 
-    t_load_staging >> t_build_dims >> t_build_fact
+    t_load_staging >> t_build_dims >> t_build_fact >> t_build_reporting
