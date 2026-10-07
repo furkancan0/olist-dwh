@@ -1,10 +1,3 @@
--- STAGING LAYER
--- One table per CSV, same column names, every column TEXT.
--- Why TEXT? The load step must never fail because of a weird value.
--- Type casting and cleaning happen later, in the core layer.
--- No primary keys on purpose: raw data may contain duplicates
--- (e.g. review_id is NOT unique in the Olist reviews file).
-
 CREATE SCHEMA IF NOT EXISTS staging;
 
 CREATE TABLE IF NOT EXISTS staging.customers (
@@ -22,8 +15,7 @@ CREATE TABLE IF NOT EXISTS staging.sellers (
     seller_state            TEXT
 );
 
--- Note: "lenght" is a typo in the source file. We keep it as-is here
--- and fix the name when we build dim_product.
+
 CREATE TABLE IF NOT EXISTS staging.products (
     product_id                  TEXT,
     product_category_name       TEXT,
