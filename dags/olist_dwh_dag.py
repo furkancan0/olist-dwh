@@ -1,7 +1,8 @@
 """
 Olist data warehouse pipeline
 
-load_staging >> build_dims >> build_fact >> build_reporting
+    load_staging >> build_dims >> build_fact >> build_reporting
+
 """
 from __future__ import annotations
 
@@ -10,13 +11,15 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from airflow import DAG
+from airflow.models.param import Param
 from airflow.operators.python import PythonOperator
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 log = logging.getLogger(__name__)
 
-WAREHOUSE_CONN_ID = "warehouse_db" 
+WAREHOUSE_CONN_ID = "warehouse_db"  
+
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 SQL_DIR = PROJECT_DIR / "sql"
@@ -33,7 +36,12 @@ CSV_TO_STAGING_TABLE = {
     "olist_order_reviews_dataset.csv": "order_reviews",
 }
 
+
 def load_staging() -> None:
+    """Create the staging tables, then truncate + COPY each CSV into its table.
+
+    Everything runs in ONE transaction: if any file fails, nothing is changed.
+    """
     missing = [f for f in CSV_TO_STAGING_TABLE if not (RAW_DIR / f).exists()]
     if missing:
         raise FileNotFoundError(f"Missing CSV files in {RAW_DIR}: {missing}")
@@ -50,7 +58,8 @@ def load_staging() -> None:
                     cur.copy_expert(
                         f"COPY staging.{table} FROM STDIN "
                         "WITH (FORMAT csv, HEADER true, ENCODING 'UTF8')",
-                        f,)
+                        f,
+                    )
                 log.info("Loaded %s rows into staging.%s from %s", cur.rowcount, table, filename)
         conn.commit()
     except Exception:
@@ -68,12 +77,19 @@ default_args = {
 
 with DAG(
     dag_id="olist_dwh",
-    description="Olist CSVs -> staging -> core star schema",
+    description="Olist CSVs -> staging -> core star schema -> reporting views",
     default_args=default_args,
     start_date=datetime(2024, 1, 1),
-    schedule=None,   # the dataset is static, so trigger runs manually
+    schedule=None,        # the dataset is static, so trigger runs manually
     catchup=False,
     template_searchpath=[str(SQL_DIR)],
+    params={
+        "full_refresh": Param(
+            False,
+            type="boolean",
+            description="Ignore the watermark and re-process ALL orders (default: only new/changed).",
+        )
+    },
     tags=["olist", "dwh"],
 ) as dag:
 
@@ -86,6 +102,7 @@ with DAG(
         task_id="build_dims",
         conn_id=WAREHOUSE_CONN_ID,
         sql=[
+            "etl/00_etl_ddl.sql",     # watermark
             "core/00_core_ddl.sql",
             "core/10_dim_date.sql",
             "core/20_dim_customer.sql",
@@ -94,12 +111,15 @@ with DAG(
         ],
     )
 
+    # All files run in one transaction: if any step fails, nothing is committed
     t_build_fact = SQLExecuteQueryOperator(
         task_id="build_fact",
         conn_id=WAREHOUSE_CONN_ID,
         sql=[
-            "core/50_fact_order_items.sql",
-            "core/60_fact_orders.sql",
+            "core/45_select_batch.sql",       # which orders are new / changed?
+            "core/50_fact_order_items.sql",   
+            "core/60_fact_orders.sql",       
+            "core/65_move_watermark.sql",     # log the run + move the watermark
         ],
     )
 
