@@ -126,7 +126,10 @@ with DAG(
     t_build_reporting = SQLExecuteQueryOperator(
         task_id="build_reporting",
         conn_id=WAREHOUSE_CONN_ID,
-        sql="reporting/70_reporting_views.sql",
+        sql=[
+            "reporting/70_reporting_views.sql",        # basic KPI views
+            "reporting/80_window_functions.sql"
+        ],
     )
 
     t_load_staging >> t_build_dims >> t_build_fact >> t_build_reporting
