@@ -1,6 +1,6 @@
 CREATE SCHEMA IF NOT EXISTS etl;
 
---The watermark: "I have processed every order changed up to this timestamp".
+--The watermark.
 CREATE TABLE IF NOT EXISTS etl.watermark (
     pipeline_name   TEXT PRIMARY KEY,
     last_watermark  TIMESTAMP   NOT NULL,
