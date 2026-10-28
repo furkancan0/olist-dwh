@@ -1,16 +1,19 @@
 x-airflow-common: &airflow-common
-  image: apache/airflow:2.11.0-python3.11
+  build: .
+  image: olist-airflow:2.11.0
   user: "${AIRFLOW_UID:-50000}:0"
   environment: &airflow-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD:-airflow}@airflow-db:5432/${POSTGRES_DB:-airflow}
-    AIRFLOW__WEBSERVER__SECRET_KEY: ${SECRET_KEY}
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in the .env file}
     AIRFLOW_CONN_WAREHOUSE_DB: postgresql://${WAREHOUSE_USER:-dw_user}:${WAREHOUSE_PASSWORD:-dw_pass}@warehouse-db:5432/${WAREHOUSE_DB:-olist_dw}
   volumes:
     - ./dags:/opt/airflow/dags
     - ./sql:/opt/airflow/sql
     - ./data:/opt/airflow/data
+    - ./include:/opt/airflow/include   # the ML code
+    - ./models:/opt/airflow/models     # trained model files are saved here
     - airflow-logs:/opt/airflow/logs
   depends_on:
     airflow-db:

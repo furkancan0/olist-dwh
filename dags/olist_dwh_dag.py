@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
+import sys
 
 from airflow import DAG
 from airflow.models.param import Param
@@ -24,6 +25,11 @@ WAREHOUSE_CONN_ID = "warehouse_db"
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 SQL_DIR = PROJECT_DIR / "sql"
 RAW_DIR = PROJECT_DIR / "data" / "raw"
+INCLUDE_DIR = PROJECT_DIR / "include"   # the ML code
+MODELS_DIR = PROJECT_DIR / "models"     # trained model files are saved here
+
+if str(INCLUDE_DIR) not in sys.path:
+    sys.path.insert(0, str(INCLUDE_DIR))
 
 CSV_TO_STAGING_TABLE = {
     "olist_customers_dataset.csv": "customers",
@@ -65,6 +71,27 @@ def load_staging() -> None:
     except Exception:
         conn.rollback()
         raise
+    finally:
+        conn.close()
+
+def train_late_delivery_model() -> dict:
+    """Train the LightGBM model on the warehouse data and save metrics + predictions.
+
+    Returns the rows written per table (same shape as load_staging), so the audit log
+    (etl.etl_run_log) shows how many predictions were written.
+    """
+    # Imported here, not at the top of the file, so that parsing the DAG stays fast and
+    # does not need the ML libraries.
+    try:
+        from late_delivery_model import run_late_delivery_model
+    except ImportError as err:
+        raise RuntimeError(
+            f"ML libraries are missing ({err}). Rebuild the Airflow image: docker compose build"
+        ) from err
+
+    conn = PostgresHook(postgres_conn_id=WAREHOUSE_CONN_ID).get_conn()
+    try:
+        return run_late_delivery_model(conn, MODELS_DIR)
     finally:
         conn.close()
 
@@ -132,4 +159,19 @@ with DAG(
         ],
     )
 
-    t_load_staging >> t_build_dims >> t_build_fact >> t_build_reporting
+    t_build_ml_features = SQLExecuteQueryOperator(
+        task_id="build_ml_features",
+        conn_id=WAREHOUSE_CONN_ID,
+        do_xcom_push=False,
+        sql=[
+            "ml/00_ml_ddl.sql",     # result tables
+            "ml/10_ml_views.sql",   # the feature table + the predictions
+        ],
+    )
+
+    t_train_model = PythonOperator(
+        task_id="train_late_delivery_model",
+        python_callable=train_late_delivery_model,
+    )
+    
+    t_load_staging >> t_build_dims >> t_build_fact >> t_build_reporting >> t_build_ml_features >> t_train_model
