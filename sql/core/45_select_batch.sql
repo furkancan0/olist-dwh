@@ -1,21 +1,3 @@
--- STEP 1 of the incremental fact load: decide WHICH orders to process.
---
--- Every order gets an "order_updated_at" = the latest timestamp we know about it:
---   purchase, approved, handed to carrier, delivered, or last review answered.
--- Olist has no "updated_at" column, but an order moves forward through these
--- steps (approved -> shipped -> delivered -> reviewed), so every normal status
--- change pushes this timestamp forward. That makes it a good WATERMARK column.
---
--- An order goes into the batch when ANY of these is true:
---   1. it is not in fact_orders yet                  -> 'new'
---   2. order_updated_at is newer than the watermark   -> 'changed'   (the watermark rule)
---   3. its status differs from the one in fact_orders -> 'changed'   (safety net, e.g. a
---      cancellation that did not add a new timestamp)
---
--- Full refresh (DAG parameter full_refresh = true) ignores the watermark and takes everything.
--- Note: the TRUE/FALSE switch in the 'wm' CTE below is Airflow (Jinja) templating:
--- Airflow replaces it with the real value of full_refresh before the SQL is sent to Postgres.
-
 TRUNCATE etl.orders_batch;
 
 INSERT INTO etl.orders_batch (order_id, order_updated_at, change_type)
